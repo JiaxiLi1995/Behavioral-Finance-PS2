@@ -1,0 +1,55 @@
+---
+title: "Event_Studies"
+author: "Jiaxi Li"
+date: "June 2, 2019"
+output: 
+  github_document:
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+# remove the error messages and warnings in the project
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+
+# Load the useful packages
+library(tidyverse)
+library(here)
+library(dplyr)
+theme_set(theme_minimal())
+set.seed(1234)
+```
+
+I would first obtain the PERMNO's and returns and share outstandings from CRSP Monthly Stock from 1959 to 2018. The conditional statements are share code 10 or 11, exchange code from 1 to 3, number of shares outstanding is not null and holding period return is not null.
+
+```{r}
+# The dataset is crsp_monthly.csv
+Stocks_montly <- read_csv(here("data","crsp_monthly.csv")) %>%
+  mutate(yearmonth = floor(date/100))
+
+# Save and write PERMNOs
+# PERMNOs <- unique(Stocks_montly$PERMNO)
+# write.table(PERMNOs, file = "Permno.txt", sep = "\t", row.names = FALSE, col.names = FALSE)
+```
+
+After extracting all the PERMNOs, I extract the book values for the stocks with the book value from the PERMNOs. The conditional Statement is Book value per Share is not null.
+
+```{r}
+# The dataset is book_value.csv
+Book <- read_csv(here("data","book_value.csv")) %>%
+  mutate(yearmonth = floor(datadate/100))
+
+# Save and write PERMNOs2
+# PERMNOs2 <- unique(Book$LPERMNO)
+# PERMNOs2 = PERMNOs2[order(PERMNOs2)]
+# write.table(PERMNOs2, file = "Permno2.txt", sep = "\t", row.names = FALSE, col.names = FALSE)
+```
+
+Extract the Permnos again and use them to obtain the dividend ex date (not null; from CRSP/Compustat Merged Database - Security Daily) and earnings announcement date (not null; CRSP/Compustat Merged Database - Fundamentals Quarterly) and the daily returns (not null; CRSP Daily Stock)
+
+
+# Session info
+
+```{r}
+session_info()
+```
