@@ -26,3 +26,5 @@ The datasets for this project are:
     * Holding Period Return
 
 Since the Dividend data only starts at 1983 and Earnings Announcement data only stars at 1961, I would obtain the data from 1959-01 to 2018-12.
+
+The detailed report could be find here([Code](https://github.com/JiaxiLi1995/Behavioral-Finance-PS2/blob/master/Event_studies.Rmd) [Report](https://github.com/JiaxiLi1995/Behavioral-Finance-PS2/blob/master/Event_studies.md)).
