@@ -20,6 +20,7 @@ theme_set(theme_minimal())
 set.seed(1234)
 ```
 
+# Data Cleaning and Variable Calculation
 I would first obtain the PERMNO's and returns and share outstandings from CRSP Monthly Stock from 1959 to 2018. The conditional statements are share code 10 or 11, exchange code from 1 to 3, number of shares outstanding is not null and holding period return is not null.
 
 ```{r, eval = FALSE}
@@ -168,29 +169,118 @@ daily <- daily %>%
   left_join(dividend) %>%
   left_join(earnings) %>%
   mutate(AR = RET - mean_ret) %>%
-  select(-c(RET, mean_ret))
+  select(-c(RET, mean_ret)) %>%
+  ungroup()
 
 write_csv(daily, "PS2.csv")
 ```
 
 Save all the daily Abnormal Returns and dividend and earnings announcement events into a data file PS2.csv
+
+# The Dividend Event
 ```{r}
 daily <- read_csv(here("PS2.csv"))
 
 # Extract the -10 to 10 day window for the dividend ex date
 divAR <- data.frame(date = -10:10, AR = -10:10, CAR = -10:10)
-for (i in -10:10) {
+for (i in -10:-1) {
   divAR$AR[11+i] <- daily %>%
     group_by(PERMNO) %>%
-    select(!is.na(lag()))
+    mutate(lag_event = lead(div_event,-i)) %>%
+    filter(!is.na(lag_event)) %>%
+    ungroup() %>%
+    summarise(AAR = mean(AR)) %>%
+    as.numeric()
 }
-divAR <- daily %>%
-  group_by(PERMNO)
+divAR$AR[11] <- daily %>%
+  group_by(PERMNO) %>%
+  filter(!is.na(div_event)) %>%
+  ungroup() %>%
+  summarise(AAR = mean(AR)) %>%
+  as.numeric()
+for (i in 1:10) {
+  divAR$AR[11+i] <- daily %>%
+    group_by(PERMNO) %>%
+    mutate(lag_event = lag(div_event,i)) %>%
+    filter(!is.na(lag_event)) %>%
+    ungroup() %>%
+    summarise(AAR = mean(AR)) %>%
+    as.numeric()
+}
+
+divAR <- divAR %>%
+  mutate(CAR = cumsum(AR))
+
+# plot the AR and CAR
+divAR %>%
+  ggplot() +
+  geom_bar(aes(x = date, y = AR*100), stat = "identity") +
+  geom_line(aes(x = date, y = CAR*100/2)) +
+  geom_point(aes(x = date, y = CAR*100/2), fill = "white") +
+  scale_y_continuous(
+    name = expression("AR (%)"), 
+    sec.axis = sec_axis(~ .*2 ,name = "CAR (%)")) +
+  labs(title = "AR and CAR around Dividend ex Date",
+       caption = "Data Source: The Center for Research in Security Prices",
+       x = "Event date") +
+  theme(plot.title = element_text(hjust=0.5))
 ```
 
+It seems that there is a positive abnormal return for dividend event. The graph supports the findings of Hartzmark and Solomon (2013): "The premium is consistent with price pressure from dividend-seeking investors. Measures of liquidity and demand for dividends are associated with larger price increases in the period before the ex-day (when there is no news about the dividend), and larger reversals afterwards."
+
+
+# The Earnings Announcement Event
+```{r}
+# Extract the -10 to 10 day window for earnings announcement date
+earnAR <- data.frame(date = -10:10, AR = -10:10, CAR = -10:10)
+for (i in -10:-1) {
+  earnAR$AR[11+i] <- daily %>%
+    group_by(PERMNO) %>%
+    mutate(lag_event = lead(earn_event,-i)) %>%
+    filter(!is.na(lag_event)) %>%
+    ungroup() %>%
+    summarise(AAR = mean(AR)) %>%
+    as.numeric()
+}
+earnAR$AR[11] <- daily %>%
+  group_by(PERMNO) %>%
+  filter(!is.na(earn_event)) %>%
+  ungroup() %>%
+  summarise(AAR = mean(AR)) %>%
+  as.numeric()
+for (i in 1:10) {
+  earnAR$AR[11+i] <- daily %>%
+    group_by(PERMNO) %>%
+    mutate(lag_event = lag(earn_event,i)) %>%
+    filter(!is.na(lag_event)) %>%
+    ungroup() %>%
+    summarise(AAR = mean(AR)) %>%
+    as.numeric()
+}
+
+earnAR <- earnAR %>%
+  mutate(CAR = cumsum(AR))
+
+# plot the AR and CAR
+earnAR %>%
+  ggplot() +
+  geom_bar(aes(x = date, y = AR*100), stat = "identity") +
+  geom_point(aes(x = date, y = CAR*100/2), fill = "white") +
+  geom_line(aes(x = date, y = CAR*100/2)) +
+  scale_y_continuous(
+    name = expression("AR (%)"), 
+    sec.axis = sec_axis(~ .*2 ,name = "CAR (%)")) +
+  labs(title = "AR and CAR around Earnings Announcement",
+       caption = "Data Source: The Center for Research in Security Prices",
+       x = "Event date") +
+  theme(plot.title = element_text(hjust=0.5))
+
+```
+
+It seems that there is a positive abnormal return for earnings annoucement as well. The effect of positive Abnormal return is gradually increasing and there is no jump as dividend ex date. It seems market are updating information before the event. This confirms the claim by Frazzini and Lamont (2007): "On average, stock prices rise around scheduled earnings announcement dates. We show that this earnings announcement premium is large, robust, and strongly related to the fact that volume surges around announcement dates.""
 
 # Session info
 
 ```{r}
-session_info()
+devtools::session_info()
 ```
