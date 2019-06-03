@@ -22,9 +22,9 @@ set.seed(1234)
 
 I would first obtain the PERMNO's and returns and share outstandings from CRSP Monthly Stock from 1959 to 2018. The conditional statements are share code 10 or 11, exchange code from 1 to 3, number of shares outstanding is not null and holding period return is not null.
 
-```{r}
+```{r, eval = FALSE}
 # The dataset is crsp_monthly.csv
-Stocks_montly <- read_csv(here("data","crsp_monthly.csv")) %>%
+Stocks_monthly <- read_csv(here("data","crsp_monthly.csv")) %>%
   mutate(yearmonth = floor(date/100))
 
 # Save and write PERMNOs
@@ -34,10 +34,11 @@ Stocks_montly <- read_csv(here("data","crsp_monthly.csv")) %>%
 
 After extracting all the PERMNOs, I extract the book values for the stocks with the book value from the PERMNOs. The conditional Statement is Book value per Share is not null.
 
-```{r}
+```{r, eval = FALSE}
 # The dataset is book_value.csv
 Book <- read_csv(here("data","book_value.csv")) %>%
-  mutate(yearmonth = floor(datadate/100))
+  mutate(yearmonth = floor(datadate/100)) %>%
+  rename(PERMNO = LPERMNO)
 
 # Save and write PERMNOs2
 # PERMNOs2 <- unique(Book$LPERMNO)
@@ -45,7 +46,147 @@ Book <- read_csv(here("data","book_value.csv")) %>%
 # write.table(PERMNOs2, file = "Permno2.txt", sep = "\t", row.names = FALSE, col.names = FALSE)
 ```
 
+Caculate the size, book-to-market, and momemtum for each stocks. The book equity value is the book equity value from the most recent fiscal year. Here, I assume that each of the value is constant for a given month.
+
+```{r, eval = FALSE}
+# merge stocks_monthly and book by PERMNO and yearmonth
+portfolios <- left_join(Stocks_monthly, Book, by = c('PERMNO','yearmonth')) %>%
+  select(PERMNO, PRC, RET, SHROUT, yearmonth, fyear, fyr, bkvlps) %>%
+# convert to log return, calculate the size and book to market and momentum (return from 12 months before to 2 months before)
+  mutate(PRC = abs(PRC),
+         size = PRC * SHROUT,
+         RET = log(RET+1))
+
+yearmonths <- unique(portfolios$yearmonth)
+yearmonths <- data.frame( yearmonth = yearmonths[order(yearmonths)]) %>%
+  mutate(lag12_ym = lag(yearmonth, 12))
+
+# create the momentum and other factors
+portfolios2 <- portfolios %>%
+  group_by(PERMNO) %>%
+  mutate(MOM = reduce(map(2:12, ~ lag(RET, ., 0)), `+`)，
+         lag12 = lag(yearmonth,12)) %>%
+  left_join(yearmonths, by = 'yearmonth') %>%
+  mutate(fyear_1 = lag(fyear,1))
+
+# fill in the missing fiscal year
+for (i in 1:14) {
+  temp <- lag(portfolios2$fyear_1,1)
+  portfolios2$fyear_1[is.na(portfolios2$fyear_1)] <- temp[is.na(portfolios2$fyear_1)]
+}
+
+# extract book value
+book_value <- portfolios2 %>%
+  select(PERMNO, fyear, bkvlps) %>%
+  filter(!is.na(bkvlps)) %>%
+  rename(fyear_1 = fyear,
+         book = bkvlps)
+  
+# merge in the book values
+portfolios2 <- portfolios2 %>%
+  left_join(book_value, by = c('fyear_1','PERMNO'))
+
+# Calculate Book to Market (BTM)
+portfolios2 <- portfolios2 %>%
+  mutate(BTM = PRC/book) %>%
+  filter(!is.na(lag12),
+         lag12 == lag12_ym) %>%
+  select(PERMNO, yearmonth, size, BTM, MOM) %>% na.omit()
+
+# form the quintiles for size BTM and MOM
+quintiles <- portfolios2 %>%
+  group_by(yearmonth) %>%
+  summarize(size_1 = quantile(size, 0.2),
+            size_2 = quantile(size, 0.4),
+            size_3 = quantile(size, 0.6),
+            size_4 = quantile(size, 0.8),
+            BTM_1 = quantile(BTM, 0.2),
+            BTM_2 = quantile(BTM, 0.4),
+            BTM_3 = quantile(BTM, 0.6),
+            BTM_4 = quantile(BTM, 0.8),
+            MOM_1 = quantile(MOM, 0.2),
+            MOM_2 = quantile(MOM, 0.4),
+            MOM_3 = quantile(MOM, 0.6),
+            MOM_4 = quantile(MOM, 0.8))
+
+# merge the quintiles data with the portfolios2
+portfolios3 <- left_join(portfolios2, quintiles) %>%
+  mutate(size_group = 1 + 1*(size>size_1) + 1*(size>size_2) + 1*(size>size_3) + 1*(size>size_4),
+         BTM_group = 1 + 1*(BTM>BTM_1) + 1*(BTM>BTM_2) + 1*(BTM>BTM_3) + 1*(BTM>BTM_4),
+         MOM_group = 1 + 1*(MOM>MOM_1) + 1*(MOM>MOM_2) + 1*(MOM>MOM_3) + 1*(MOM>MOM_4)) %>%
+  select(PERMNO, yearmonth, size_group, BTM_group, MOM_group) %>%
+  rename(yearmonth_1 = yearmonth)
+
+# create the matching yearmonths
+yearmonths <- yearmonths %>%
+  select(yearmonth) %>%
+  mutate(yearmonth_1 = lag(yearmonth,1))
+
+# merge the months
+portfolios3 <- portfolios3 %>%
+  left_join(yearmonths) %>%
+  select(-yearmonth_1)
+```
+
+After defining the groups for each PERMNO/month, One needs to remember that when one uses lagged characteristics to find the matching portfolios.
+
 Extract the Permnos again and use them to obtain the dividend ex date (not null; from CRSP/Compustat Merged Database - Security Daily) and earnings announcement date (not null; CRSP/Compustat Merged Database - Fundamentals Quarterly) and the daily returns (not null; CRSP Daily Stock)
+
+```{r, eval = FALSE}
+# load daily returns
+daily <- read_csv(here("data","crsp_daily.csv")) %>%
+  select(-c("SHRCD","EXCHCD")) %>%
+  mutate(yearmonth = floor(date/100)) %>%
+  inner_join(portfolios3)
+  
+# calculate the average returns for each porfolio.
+ports <- daily %>%
+  group_by(date, size_group, BTM_group, MOM_group) %>%
+  summarize(mean_ret = mean(RET))
+
+# merge all the daily returns with the portfolio return
+daily <- daily %>%
+  inner_join(ports) %>%
+  select(PERMNO, date, RET, mean_ret)
+
+# load dividend
+dividend <- read_csv(here("data","dividend.csv")) %>%
+  rename(PERMNO = LPERMNO,
+         date = datadate) %>%
+  select(PERMNO, date) %>%
+  mutate(div_event = 1)
+
+# load earnings announcement
+earnings <- read_csv(here("data","earnings.csv")) %>%
+  rename(PERMNO = LPERMNO,
+         date = rdq) %>%
+  select(PERMNO, date) %>%
+  mutate(earn_event = 1)
+
+# merge all return, dividend and earnings annoucenment data and compute abnormal returns
+daily <- daily %>%
+  left_join(dividend) %>%
+  left_join(earnings) %>%
+  mutate(AR = RET - mean_ret) %>%
+  select(-c(RET, mean_ret))
+
+write_csv(daily, "PS2.csv")
+```
+
+Save all the daily Abnormal Returns and dividend and earnings announcement events into a data file PS2.csv
+```{r}
+daily <- read_csv(here("PS2.csv"))
+
+# Extract the -10 to 10 day window for the dividend ex date
+divAR <- data.frame(date = -10:10, AR = -10:10, CAR = -10:10)
+for (i in -10:10) {
+  divAR$AR[11+i] <- daily %>%
+    group_by(PERMNO) %>%
+    select(!is.na(lag()))
+}
+divAR <- daily %>%
+  group_by(PERMNO)
+```
 
 
 # Session info
